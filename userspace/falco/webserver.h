@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2019 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,70 +14,36 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
-#include <memory>
-
-#include "CivetServer.h"
+#pragma once
 
 #include "configuration.h"
-#include "falco_engine.h"
-#include "falco_outputs.h"
 
-class k8s_audit_handler : public CivetHandler
-{
+#include <libsinsp/sinsp.h>
+
+#include <httplib.h>
+
+#include <memory>
+#include <thread>
+
+namespace falco::app {
+struct state;
+}
+
+class falco_webserver {
 public:
-	k8s_audit_handler(falco_engine *engine, falco_outputs *outputs, std::size_t k8s_audit_event_source_idx);
-	virtual ~k8s_audit_handler();
-
-	bool handleGet(CivetServer *server, struct mg_connection *conn);
-	bool handlePost(CivetServer *server, struct mg_connection *conn);
-
-	static bool accept_data(falco_engine *engine,
-				falco_outputs *outputs,
-				std::size_t k8s_audit_event_source_idx,
-				std::string &post_data, std::string &errstr);
-
-private:
-	falco_engine *m_engine;
-	falco_outputs *m_outputs;
-	std::size_t m_k8s_audit_event_source_idx;
-	bool accept_uploaded_data(std::string &post_data, std::string &errstr);
-};
-
-class k8s_healthz_handler : public CivetHandler
-{
-public:
-	k8s_healthz_handler()
-	{
-	}
-
-	virtual ~k8s_healthz_handler()
-	{
-	}
-
-	bool handleGet(CivetServer *server, struct mg_connection *conn);
-};
-
-class falco_webserver
-{
-public:
-	falco_webserver();
+	falco_webserver() = default;
 	virtual ~falco_webserver();
-
-	void init(falco_configuration *config,
-		  falco_engine *engine,
-		  falco_outputs *outputs,
-		  std::size_t k8s_audit_event_source_idx);
-
-	void start();
-	void stop();
+	falco_webserver(falco_webserver&&) = default;
+	falco_webserver& operator=(falco_webserver&&) = default;
+	falco_webserver(const falco_webserver&) = delete;
+	falco_webserver& operator=(const falco_webserver&) = delete;
+	virtual void start(const falco::app::state& state,
+	                   const falco_configuration::webserver_config& webserver_config);
+	virtual void stop();
 
 private:
-	falco_engine *m_engine;
-	falco_configuration *m_config;
-	falco_outputs *m_outputs;
-	std::size_t m_k8s_audit_event_source_idx;
-	unique_ptr<CivetServer> m_server;
-	unique_ptr<k8s_audit_handler> m_k8s_audit_handler;
-	unique_ptr<k8s_healthz_handler> m_k8s_healthz_handler;
+	bool m_running = false;
+	std::unique_ptr<httplib::Server> m_server = nullptr;
+	std::thread m_server_thread;
+	std::atomic<bool> m_failed;
 };

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2019 The Falco Authors
+Copyright (C) 2023 The Falco Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,11 +18,8 @@ limitations under the License.
 #include <sstream>
 
 #include "grpc_context.h"
-#include "banned.h" // This raises a compilation error when certain functions are used
 
-falco::grpc::context::context(::grpc::ServerContext* ctx):
-	m_ctx(ctx)
-{
+falco::grpc::context::context(::grpc::ServerContext* ctx): m_ctx(ctx) {
 	std::string session_id;
 	std::string request_id;
 
@@ -30,29 +28,25 @@ falco::grpc::context::context(::grpc::ServerContext* ctx):
 
 	bool has_meta = false;
 	std::stringstream meta;
-	if(!session_id.empty())
-	{
+	if(!session_id.empty()) {
 		meta << "[sid=" << session_id << "]";
 		has_meta = true;
 	}
-	if(!request_id.empty())
-	{
+	if(!request_id.empty()) {
 		meta << "[rid=" << request_id << "]";
 		has_meta = true;
 	}
-	if(has_meta)
-	{
+	if(has_meta) {
 		meta << " ";
 	}
 	m_prefix = meta.str();
 }
 
-void falco::grpc::context::context::get_metadata(std::string key, std::string& val)
-{
-	const std::multimap<::grpc::string_ref, ::grpc::string_ref>& client_metadata = m_ctx->client_metadata();
+void falco::grpc::context::context::get_metadata(std::string key, std::string& val) {
+	const std::multimap<::grpc::string_ref, ::grpc::string_ref>& client_metadata =
+	        m_ctx->client_metadata();
 	auto it = client_metadata.find(key);
-	if(it != client_metadata.end())
-	{
+	if(it != client_metadata.end()) {
 		val.assign(it->second.data(), it->second.size());
 	}
 }
