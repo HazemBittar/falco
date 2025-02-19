@@ -1,6 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (C) 2021 The Falco Authors.
+# Copyright (C) 2023 The Falco Authors.
 #
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,13 +18,20 @@
 #
 set -e
 
-DKMS_PACKAGE_NAME="@PACKAGE_NAME@"
-DKMS_VERSION="@DRIVER_VERSION@"
+# Based off what debhelper dh_systemd_enable/13.3.4 would have added
+# ref: https://www.debian.org/doc/manuals/debmake-doc/ch05.en.html#debhelper
+# Currently running falco service uses the driver, so stop it before driver cleanup
 
 case "$1" in
-	remove|upgrade|deconfigure)
-		if [  "$(dkms status -m $DKMS_PACKAGE_NAME -v $DKMS_VERSION)" ]; then
-			dkms remove -m $DKMS_PACKAGE_NAME -v $DKMS_VERSION --all
-		fi
-	;;
+    remove|upgrade|deconfigure)
+      echo "[PRE-REMOVE] Stop all Falco services:"
+      systemctl --system stop 'falco-kmod.service' || true
+      systemctl --system stop 'falco-bpf.service' || true
+      systemctl --system stop 'falco-modern-bpf.service' || true
+      systemctl --system stop 'falco-custom.service' || true
+      systemctl --system stop 'falcoctl-artifact-follow.service' || true
+
+      echo "[PRE-REMOVE] Call 'falcoctl driver cleanup:'"
+      falcoctl driver cleanup
+    ;;
 esac

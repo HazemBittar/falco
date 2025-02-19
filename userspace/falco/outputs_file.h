@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2020 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,18 +21,15 @@ limitations under the License.
 #include <iostream>
 #include <fstream>
 
-namespace falco
-{
-namespace outputs
-{
+namespace falco {
+namespace outputs {
 
-class output_file : public abstract_output
-{
-	void output(const message *msg);
+class output_file : public abstract_output {
+	void output(const message *msg) override;
 
-	void cleanup();
+	void cleanup() override;
 
-	void reopen();
+	void reopen() override;
 
 private:
 	void open_file();
@@ -39,5 +37,5 @@ private:
 	std::ofstream m_outfile;
 };
 
-} // namespace outputs
-} // namespace falco
+}  // namespace outputs
+}  // namespace falco

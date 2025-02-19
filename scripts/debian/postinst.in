@@ -1,6 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 #
-# Copyright (C) 2021 The Falco Authors.
+# Copyright (C) 2023 The Falco Authors.
 #
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,29 +16,130 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
+# By default, we use the automatic selection for drivers
+chosen_driver="auto"
+chosen_unit=
+CHOICE=
+
+# Every time we call this script we want to stat from a clean state.
+echo "[POST-INSTALL] Disable all possible 'falco' services:"
+systemctl --system stop 'falco-kmod.service' || true
+systemctl --system stop 'falco-bpf.service' || true
+systemctl --system stop 'falco-modern-bpf.service' || true
+systemctl --system stop 'falco-custom.service' || true
+systemctl --system stop 'falcoctl-artifact-follow.service' || true
+systemctl --system disable 'falco-kmod.service' || true
+systemctl --system disable 'falco-bpf.service' || true
+systemctl --system disable 'falco-modern-bpf.service' || true
+systemctl --system disable 'falco-custom.service' || true
+systemctl --system disable 'falcoctl-artifact-follow.service' || true
+
+# unmask falcoctl if it was masked
+systemctl --system unmask falcoctl-artifact-follow.service || true
+
+if [ "$1" = "configure" ]; then
+	# "auto" case is not managed here since it is already the default, so no CHOICE=2
+        case $FALCO_DRIVER_CHOICE in
+              none)
+                  CHOICE=1
+                  ;;
+              kmod)
+                  CHOICE=3
+                  ;;
+              ebpf)
+                  CHOICE=4
+                  ;;
+              modern_ebpf)
+                  CHOICE=5
+                  ;;
+        esac     
+        if [ -z $CHOICE ] && [ -x /usr/bin/dialog ] && [ "${FALCO_FRONTEND}" != "noninteractive" ]; then          
+            # If dialog is installed, create a dialog to let users choose the correct driver for them
+            CHOICE=$(dialog --clear --title "Falco drivers" --menu "Choose your preferred driver:" 12 55 4 \
+                    1 "Manual configuration (no unit is started)" \
+                    2 "Automatic selection" \
+                    3 "Kmod" \
+                    4 "eBPF" \
+                    5 "Modern eBPF" \
+                    2>&1 >/dev/tty)
+        fi
+        # "auto" case is not managed here since it is already the default, so no CHOICE=2
+        case $CHOICE in
+            1)
+                chosen_driver=""
+                ;;
+            3)
+                chosen_driver="kmod"
+                ;;
+            4)
+                chosen_driver="ebpf"
+                ;;
+            5)
+                chosen_driver="modern_ebpf"
+                ;;
+        esac
+        if [ -n "$chosen_driver" ]; then
+            echo "[POST-INSTALL] Configure falcoctl '$chosen_driver' driver type:"
+            if [ "$chosen_driver" = "auto" ];  then
+                # Configure falcoctl to enable all drivers
+                falcoctl driver config --type "modern_ebpf" --type "kmod" --type "ebpf"
+                # Load the actually automatic chosen driver
+                chosen_driver=$(falcoctl driver printenv | grep DRIVER= | cut -d'"' -f2)
+            else
+                falcoctl driver config --type "$chosen_driver"
+            fi
+            CHOICE=
+            case $FALCOCTL_ENABLED in
+                no)
+                    CHOICE=2
+                    ;;
+            esac
+            if [ -z $CHOICE ] &&  [ -x /usr/bin/dialog ] && [ "${FALCO_FRONTEND}" != "noninteractive" ]; then
+                CHOICE=$(dialog --clear --title "Falcoctl" --menu "Do you want to follow automatic ruleset updates?" 10 40 2 \
+                        1 "Yes" \
+                        2 "No" \
+                        2>&1 >/dev/tty)
+            fi  
+            case $CHOICE in
+                2)
+                    # we don't want falcoctl enabled, we mask it
+                    systemctl --system mask falcoctl-artifact-follow.service || true
+                ;;
+            esac
+        fi    
+        clear
+fi
+
 set -e
 
-DKMS_PACKAGE_NAME="@PACKAGE_NAME@"
-DKMS_VERSION="@DRIVER_VERSION@"
-NAME="@PACKAGE_NAME@"
+echo "[POST-INSTALL] Trigger deamon-reload:"
+systemctl --system daemon-reload || true
 
-postinst_found=0
-
-case "$1" in
-	configure)
-		for DKMS_POSTINST in /usr/lib/dkms/common.postinst /usr/share/$DKMS_PACKAGE_NAME/postinst; do
-			if [ -f $DKMS_POSTINST ]; then
-				$DKMS_POSTINST $DKMS_PACKAGE_NAME $DKMS_VERSION /usr/share/$DKMS_PACKAGE_NAME "" $2
-				postinst_found=1
-				break
-			fi
-		done
-		if [ "$postinst_found" -eq 0 ]; then
-			echo "ERROR: DKMS version is too old and $DKMS_PACKAGE_NAME was not"
-			echo "built with legacy DKMS support."
-			echo "You must either rebuild $DKMS_PACKAGE_NAME with legacy postinst"
-			echo "support or upgrade DKMS to a more current version."
-			exit 1
-		fi
-	;;
+# If needed, try to load/compile the driver through falcoctl
+case "$chosen_driver" in
+    "kmod")
+      # Only compile for kmod, in this way we use dkms
+      echo "[POST-INSTALL] Call 'falcoctl driver install for kmod:"
+      falcoctl driver install --download=false
+      chosen_unit="kmod"
+      ;;
+    "ebpf")
+      echo "[POST-INSTALL] Call 'falcoctl driver install for ebpf':"
+      falcoctl driver install
+      chosen_unit="bpf"
+      ;;
+    "modern_ebpf")
+      chosen_unit="modern-bpf"
+      ;;
 esac
+
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+        if [ -n "$chosen_unit" ]; then
+            # we do this in 2 steps because `enable --now` is not always supported
+            echo "[POST-INSTALL] Enable 'falco-$chosen_unit.service':"
+            systemctl --system enable "falco-$chosen_unit.service" || true
+            echo "[POST-INSTALL] Start 'falco-$chosen_unit.service':"
+            systemctl --system start "falco-$chosen_unit.service" || true
+        fi
+fi
