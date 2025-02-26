@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2019 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,258 +15,93 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include <stdio.h>
-#include <string.h>
-
-#include "falco_common.h"
 #include "webserver.h"
-#include "json_evt.h"
-#include "banned.h" // This raises a compilation error when certain functions are used
+#include "falco_utils.h"
+#include "falco_metrics.h"
+#include "app/state.h"
+#include "versions_info.h"
+#include <atomic>
 
-using json = nlohmann::json;
-using namespace std;
-
-k8s_audit_handler::k8s_audit_handler(falco_engine *engine, falco_outputs *outputs, std::size_t k8s_audit_event_source_idx):
-	m_engine(engine), m_outputs(outputs), m_k8s_audit_event_source_idx(k8s_audit_event_source_idx)
-{
-}
-
-k8s_audit_handler::~k8s_audit_handler()
-{
-}
-
-bool k8s_healthz_handler::handleGet(CivetServer *server, struct mg_connection *conn)
-{
-	const std::string status_body = "{\"status\": \"ok\"}";
-	mg_send_http_ok(conn, "application/json", status_body.size());
-	mg_printf(conn, "%s", status_body.c_str());
-
-	return true;
-}
-
-bool k8s_audit_handler::accept_data(falco_engine *engine,
-				    falco_outputs *outputs,
-				    std::size_t k8s_audit_event_source_idx,
-				    std::string &data,
-				    std::string &errstr)
-{
-	std::list<json_event> jevts;
-	json j;
-
-	try
-	{
-		j = json::parse(data);
-	}
-	catch(json::parse_error &e)
-	{
-		errstr = string("Could not parse data: ") + e.what();
-		return false;
-	}
-	catch(json::out_of_range &e)
-	{
-		errstr = string("Could not parse data: ") + e.what();
-		return false;
-	}
-
-	bool ok;
-	try
-	{
-		ok = falco_k8s_audit::parse_k8s_audit_json(j, jevts);
-	}
-	catch(json::type_error &e)
-	{
-		ok = false;
-	}
-	if(!ok)
-	{
-		errstr = string("Data not recognized as a k8s audit event");
-		return false;
-	}
-
-	for(auto &jev : jevts)
-	{
-		std::unique_ptr<falco_engine::rule_result> res;
-
-		try
-		{
-			res = engine->process_event(k8s_audit_event_source_idx, &jev);
-		}
-		catch(...)
-		{
-			errstr = string("unknown error processing audit event");
-			fprintf(stderr, "%s\n", errstr.c_str());
-			return false;
-		}
-
-		if(res)
-		{
-			try
-			{
-				outputs->handle_event(res->evt, res->rule,
-						      res->source, res->priority_num,
-						      res->format, res->tags);
-			}
-			catch(falco_exception &e)
-			{
-				errstr = string("Internal error handling output: ") + e.what();
-				fprintf(stderr, "%s\n", errstr.c_str());
-				return false;
-			}
-		}
-	}
-
-	return true;
-}
-
-bool k8s_audit_handler::accept_uploaded_data(std::string &post_data, std::string &errstr)
-{
-	return k8s_audit_handler::accept_data(m_engine, m_outputs, m_k8s_audit_event_source_idx, post_data, errstr);
-}
-
-bool k8s_audit_handler::handleGet(CivetServer *server, struct mg_connection *conn)
-{
-	mg_send_http_error(conn, 405, "GET method not allowed");
-
-	return true;
-}
-
-// The version in CivetServer.cpp has valgrind complaints due to
-// unguarded initialization of c++ string from buffer.
-static void get_post_data(struct mg_connection *conn, std::string &postdata)
-{
-	mg_lock_connection(conn);
-	char buf[2048];
-	int r = mg_read(conn, buf, sizeof(buf));
-	while(r > 0)
-	{
-		postdata.append(buf, r);
-		r = mg_read(conn, buf, sizeof(buf));
-	}
-	mg_unlock_connection(conn);
-}
-
-bool k8s_audit_handler::handlePost(CivetServer *server, struct mg_connection *conn)
-{
-	// Ensure that the content-type is application/json
-	const char *ct = server->getHeader(conn, string("Content-Type"));
-
-	// content type *must* start with application/json
-	if(ct == NULL || strncmp(ct, "application/json", strlen("application/json")) != 0)
-	{
-		mg_send_http_error(conn, 400, "Wrong Content Type");
-
-		return true;
-	}
-
-	std::string post_data;
-	get_post_data(conn, post_data);
-	std::string errstr;
-
-	if(!accept_uploaded_data(post_data, errstr))
-	{
-		errstr = "Bad Request: " + errstr;
-		mg_send_http_error(conn, 400, "%s", errstr.c_str());
-
-		return true;
-	}
-
-	const std::string ok_body = "<html><body>Ok</body></html>";
-	mg_send_http_ok(conn, "text/html", ok_body.size());
-	mg_printf(conn, "%s", ok_body.c_str());
-
-	return true;
-}
-
-falco_webserver::falco_webserver():
-	m_config(NULL)
-{
-}
-
-falco_webserver::~falco_webserver()
-{
+falco_webserver::~falco_webserver() {
 	stop();
 }
 
-void falco_webserver::init(falco_configuration *config,
-			   falco_engine *engine,
-			   falco_outputs *outputs,
-			   std::size_t k8s_audit_event_source_idx)
-{
-	m_config = config;
-	m_engine = engine;
-	m_outputs = outputs;
-	m_k8s_audit_event_source_idx = k8s_audit_event_source_idx;
-}
+void falco_webserver::start(const falco::app::state &state,
+                            const falco_configuration::webserver_config &webserver_config) {
+	if(m_running) {
+		throw falco_exception("attempted restarting webserver without stopping it first");
+	}
 
-template<typename T, typename... Args>
-std::unique_ptr<T> make_unique(Args &&... args)
-{
-	return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
+	// allocate and configure server
+	if(webserver_config.m_ssl_enabled) {
+		m_server = std::make_unique<httplib::SSLServer>(webserver_config.m_ssl_certificate.c_str(),
+		                                                webserver_config.m_ssl_certificate.c_str());
+	} else {
+		m_server = std::make_unique<httplib::Server>();
+	}
 
-void falco_webserver::start()
-{
-	if(m_server)
-	{
+	// configure server
+	m_server->new_task_queue = [webserver_config] {
+		return new httplib::ThreadPool(webserver_config.m_threadiness);
+	};
+
+	// setup healthz endpoint
+	m_server->Get(webserver_config.m_k8s_healthz_endpoint,
+	              [](const httplib::Request &, httplib::Response &res) {
+		              res.set_content("{\"status\": \"ok\"}", "application/json");
+	              });
+
+	// setup versions endpoint
+	const auto versions_json_str = falco::versions_info(state.offline_inspector).as_json().dump();
+	m_server->Get("/versions",
+	              [versions_json_str](const httplib::Request &, httplib::Response &res) {
+		              res.set_content(versions_json_str, "application/json");
+	              });
+
+	if(state.config->m_metrics_enabled && webserver_config.m_prometheus_metrics_enabled) {
+		m_server->Get("/metrics", [&state](const httplib::Request &, httplib::Response &res) {
+			res.set_content(falco_metrics::to_text(state), falco_metrics::content_type);
+		});
+	}
+	// run server in a separate thread
+	if(!m_server->is_valid()) {
+		m_server = nullptr;
+		throw falco_exception("invalid webserver configuration");
+	}
+
+	m_failed.store(false, std::memory_order_release);
+	m_server_thread = std::thread([this, webserver_config] {
+		try {
+			this->m_server->listen(webserver_config.m_listen_address,
+			                       webserver_config.m_listen_port);
+		} catch(std::exception &e) {
+			falco_logger::log(falco_logger::level::ERR,
+			                  "falco_webserver: " + std::string(e.what()) + "\n");
+		}
+		this->m_failed.store(true, std::memory_order_release);
+	});
+
+	// wait for the server to actually start up
+	// note: is_running() is atomic
+	while(!m_server->is_running() && !m_failed.load(std::memory_order_acquire)) {
+		std::this_thread::yield();
+	}
+	m_running = true;
+	if(m_failed.load(std::memory_order_acquire)) {
 		stop();
+		throw falco_exception("an error occurred while starting webserver");
 	}
-
-	if(!m_config)
-	{
-		throw falco_exception("No config provided to webserver");
-	}
-
-	if(!m_engine)
-	{
-		throw falco_exception("No engine provided to webserver");
-	}
-
-	if(!m_outputs)
-	{
-		throw falco_exception("No outputs provided to webserver");
-	}
-
-	std::vector<std::string> cpp_options = {
-		"num_threads", to_string(1)};
-
-	if(m_config->m_webserver_ssl_enabled)
-	{
-		cpp_options.push_back("listening_ports");
-		cpp_options.push_back(to_string(m_config->m_webserver_listen_port) + "s");
-		cpp_options.push_back("ssl_certificate");
-		cpp_options.push_back(m_config->m_webserver_ssl_certificate);
-	}
-	else
-	{
-		cpp_options.push_back("listening_ports");
-		cpp_options.push_back(to_string(m_config->m_webserver_listen_port));
-	}
-
-	try
-	{
-		m_server = make_unique<CivetServer>(cpp_options);
-	}
-	catch(CivetException &e)
-	{
-		throw falco_exception(std::string("Could not create embedded webserver: ") + e.what());
-	}
-	if(!m_server->getContext())
-	{
-		throw falco_exception("Could not create embedded webserver");
-	}
-
-	m_k8s_audit_handler = make_unique<k8s_audit_handler>(m_engine, m_outputs, m_k8s_audit_event_source_idx);
-	m_server->addHandler(m_config->m_webserver_k8s_audit_endpoint, *m_k8s_audit_handler);
-	m_k8s_healthz_handler = make_unique<k8s_healthz_handler>();
-	m_server->addHandler(m_config->m_webserver_k8s_healthz_endpoint, *m_k8s_healthz_handler);
 }
 
-void falco_webserver::stop()
-{
-	if(m_server)
-	{
-		m_server = NULL;
-		m_k8s_audit_handler = NULL;
-		m_k8s_healthz_handler = NULL;
+void falco_webserver::stop() {
+	if(m_running) {
+		if(m_server != nullptr) {
+			m_server->stop();
+		}
+		if(m_server_thread.joinable()) {
+			m_server_thread.join();
+		}
+		m_server = nullptr;
+		m_running = false;
 	}
 }

@@ -1,16 +1,15 @@
 approvers:
-  - fntlnz
-  - kris-nova
-  - leodido
   - mstemm
   - leogr
   - jasondellaluce
+  - fededp
+  - andreagit97
+  - incertum
+  - LucaGuerra
+  - sgaist
 reviewers:
-  - fntlnz
   - kaizhe
+emeritus_approvers:
+  - fntlnz
   - kris-nova
   - leodido
-  - mfdii
-  - mstemm
-  - leogr
-  - jasondellaluce

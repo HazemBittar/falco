@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2022 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,66 +18,53 @@ limitations under the License.
 #include "stats_manager.h"
 #include "falco_common.h"
 
-using namespace std;
+stats_manager::stats_manager(): m_total(0) {}
 
-void stats_manager::clear()
-{
+stats_manager::~stats_manager() {
+	clear();
+}
+
+void stats_manager::clear() {
 	m_total = 0;
 	m_by_rule_id.clear();
 	m_by_priority.clear();
 }
 
-void stats_manager::format(
-	const indexed_vector<falco_rule>& rules,
-	string& out)
-{
-	string fmt;
-	string name;
+void stats_manager::format(const indexed_vector<falco_rule>& rules, std::string& out) const {
+	std::string fmt;
 	out = "Events detected: " + to_string(m_total) + "\n";
 	out += "Rule counts by severity:\n";
-	for (size_t i = 0; i < m_by_priority.size(); i++)
-	{
-		if (m_by_priority[i] > 0)
-		{
-			falco_common::format_priority(
-				(falco_common::priority_type) i, fmt, true);
+	for(size_t i = 0; i < m_by_priority.size(); i++) {
+		auto val = m_by_priority[i]->load();
+		if(val > 0) {
+			falco_common::format_priority((falco_common::priority_type)i, fmt, true);
 			transform(fmt.begin(), fmt.end(), fmt.begin(), ::toupper);
-			out += "   " + fmt;
-			out += ": " + to_string(m_by_priority[i]) + "\n";
+			out += "   " + fmt + ": " + std::to_string(val) + "\n";
 		}
 	}
 	out += "Triggered rules by rule name:\n";
-	for (size_t i = 0; i < m_by_rule_id.size(); i++)
-	{
-		if (m_by_rule_id[i] > 0)
-		{
-			out += "   " + rules.at(i)->name;
-			out += ": " + to_string(m_by_rule_id[i]) + "\n";
+	for(size_t i = 0; i < m_by_rule_id.size(); i++) {
+		auto val = m_by_rule_id[i]->load();
+		if(val > 0) {
+			out += "   " + rules.at(i)->name + ": " + std::to_string(val) + "\n";
 		}
 	}
 }
 
-void stats_manager::on_event(
-		const indexed_vector<falco_rule>& rules,
-		uint32_t rule_id)
-{
-	auto *rule = rules.at(rule_id);
-	if (!rule)
-	{
-		throw falco_exception(
-			"on_event(): event with invalid rule_id: " + rule_id);
+void stats_manager::on_rule_loaded(const falco_rule& rule) {
+	while(m_by_rule_id.size() <= rule.id) {
+		m_by_rule_id.emplace_back(std::make_unique<std::atomic<uint64_t>>(0));
 	}
-	if (m_by_rule_id.size() <= rule_id)
-	{
-		m_by_rule_id.resize(rule_id + 1);
-		m_by_rule_id[rule_id] = 0;
+	while(m_by_priority.size() <= (size_t)rule.priority) {
+		m_by_priority.emplace_back(std::make_unique<std::atomic<uint64_t>>(0));
 	}
-	if (m_by_priority.size() <= (size_t) rule->priority)
-	{
-		m_by_priority.resize((size_t) rule->priority + 1);
-		m_by_priority[(size_t) rule->priority] = 0;
+}
+
+void stats_manager::on_event(const falco_rule& rule) {
+	if(m_by_rule_id.size() <= rule.id || m_by_priority.size() <= (size_t)rule.priority) {
+		throw falco_exception("rule id or priority out of bounds");
 	}
-	m_total++;
-	m_by_rule_id[rule_id]++;
-	m_by_priority[(size_t) rule->priority]++;
+	m_total.fetch_add(1, std::memory_order_relaxed);
+	m_by_rule_id[rule.id]->fetch_add(1, std::memory_order_relaxed);
+	m_by_priority[(size_t)rule.priority]->fetch_add(1, std::memory_order_relaxed);
 }

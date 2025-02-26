@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2020 The Falco Authors
+Copyright (C) 2023 The Falco Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,10 +17,8 @@ limitations under the License.
 
 #include "outputs_syslog.h"
 #include <syslog.h>
-#include "banned.h" // This raises a compilation error when certain functions are used
 
-void falco::outputs::output_syslog::output(const message *msg)
-{
+void falco::outputs::output_syslog::output(const message *msg) {
 	// Syslog output should not have any trailing newline
 	::syslog(msg->priority, "%s", msg->msg.c_str());
 }

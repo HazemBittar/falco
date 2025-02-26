@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2020 The Falco Authors
+Copyright (C) 2023 The Falco Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,45 +18,35 @@ limitations under the License.
 #include "outputs_file.h"
 #include <iostream>
 #include <fstream>
-#include "banned.h" // This raises a compilation error when certain functions are used
 
-void falco::outputs::output_file::open_file()
-{
-	if(!m_buffered)
-	{
+void falco::outputs::output_file::open_file() {
+	if(!m_buffered) {
 		m_outfile.rdbuf()->pubsetbuf(0, 0);
 	}
-	if(!m_outfile.is_open())
-	{
-		m_outfile.open(m_oc.options["filename"], fstream::app);
-		if (m_outfile.fail())
-		{
+	if(!m_outfile.is_open()) {
+		m_outfile.open(m_oc.options["filename"], std::fstream::app);
+		if(m_outfile.fail()) {
 			throw falco_exception("failed to open output file " + m_oc.options["filename"]);
 		}
 	}
 }
 
-void falco::outputs::output_file::output(const message *msg)
-{
+void falco::outputs::output_file::output(const message *msg) {
 	open_file();
 	m_outfile << msg->msg + "\n";
 
-	if(m_oc.options["keep_alive"] != "true")
-	{
+	if(m_oc.options["keep_alive"] != "true") {
 		cleanup();
 	}
 }
 
-void falco::outputs::output_file::cleanup()
-{
-	if(m_outfile.is_open())
-	{
+void falco::outputs::output_file::cleanup() {
+	if(m_outfile.is_open()) {
 		m_outfile.close();
 	}
 }
 
-void falco::outputs::output_file::reopen()
-{
+void falco::outputs::output_file::reopen() {
 	cleanup();
 	open_file();
 }

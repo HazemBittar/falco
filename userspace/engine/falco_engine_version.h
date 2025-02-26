@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2021 The Falco Authors.
+Copyright (C) 2023 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,11 +15,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// The version of rules/filter fields/etc supported by this Falco
-// engine.
-#define FALCO_ENGINE_VERSION (11)
+#define __FALCO_ENGINE_STRINGIFY1(str) #str
+#define __FALCO_ENGINE_STRINGIFY(str) __FALCO_ENGINE_STRINGIFY1(str)
 
-// This is the result of running "falco --list -N | sha256sum" and
-// represents the fields supported by this version of Falco. It's used
-// at build time to detect a changed set of fields.
-#define FALCO_FIELDS_CHECKSUM "4de812495f8529ac20bda2b9774462b15911a51df293d59fe9ccb6b922fdeb9d"
+// The version of this Falco engine
+#define FALCO_ENGINE_VERSION_MAJOR 0
+#define FALCO_ENGINE_VERSION_MINOR 47
+#define FALCO_ENGINE_VERSION_PATCH 0
+
+#define FALCO_ENGINE_VERSION                                                               \
+	__FALCO_ENGINE_STRINGIFY(FALCO_ENGINE_VERSION_MAJOR)                                   \
+	"." __FALCO_ENGINE_STRINGIFY(FALCO_ENGINE_VERSION_MINOR) "." __FALCO_ENGINE_STRINGIFY( \
+	        FALCO_ENGINE_VERSION_PATCH)
+
+// This is the result of running the following command:
+//   FALCO="falco -c ./falco.yaml"
+//   echo $($FALCO --version | grep 'Engine:' | awk '{print $2}') $(echo $($FALCO --version | grep
+//   'Schema version:' | awk '{print $3}') $($FALCO --list --markdown | grep '^`' | sort) $($FALCO
+//   --list-events | sort) | sha256sum)
+// It represents the fields supported by this version of Falco,
+// the event types, and the underlying driverevent schema. It's used to
+// detetect changes in engine version in our CI jobs.
+#define FALCO_ENGINE_CHECKSUM "1478da9cefb00623e5158e6582ff5322a2118f804c61ddb65f57079353257611"

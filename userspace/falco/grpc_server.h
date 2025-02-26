@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
-Copyright (C) 2019 The Falco Authors
+Copyright (C) 2023 The Falco Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,31 +19,30 @@ limitations under the License.
 
 #include <thread>
 #include <string>
+#include <atomic>
 
-#include "grpc_server_impl.h"
+#include "outputs.grpc.pb.h"
+#include "version.grpc.pb.h"
+#include "grpc_context.h"
 
-namespace falco
-{
-namespace grpc
-{
+namespace falco {
+namespace grpc {
 
-class server : public server_impl
-{
+class server {
 public:
 	server() = default;
 	virtual ~server() = default;
 
-	void init(
-		std::string server_addr,
-		int threadiness,
-		std::string private_key,
-		std::string cert_chain,
-		std::string root_certs,
-		std::string log_level
-	);
+	void init(const std::string& server_addr,
+	          int threadiness,
+	          const std::string& private_key,
+	          const std::string& cert_chain,
+	          const std::string& root_certs,
+	          const std::string& log_level);
 	void thread_process(int thread_index);
 	void run();
 	void stop();
+	void shutdown();
 
 	outputs::service::AsyncService m_output_svc;
 	version::service::AsyncService m_version_svc;
@@ -51,17 +51,29 @@ public:
 
 private:
 	std::string m_server_addr;
-	int m_threadiness;
+	int m_threadiness = 1;
 	std::string m_private_key;
 	std::string m_cert_chain;
 	std::string m_root_certs;
 
-	std::unique_ptr<::grpc::Server> m_server;
 	std::vector<std::thread> m_threads;
 	::grpc::ServerBuilder m_server_builder;
 	void init_mtls_server_builder();
 	void init_unix_server_builder();
+
+	bool is_running();
+
+	// Outputs
+	void get(const stream_context& ctx, const outputs::request& req, outputs::response& res);
+	void sub(const bidi_context& ctx, const outputs::request& req, outputs::response& res);
+
+	// Version
+	void version(const context& ctx, const version::request& req, version::response& res);
+
+	std::unique_ptr<::grpc::Server> m_server;
+
+	std::atomic<bool> m_stop{false};
 };
 
-} // namespace grpc
-} // namespace falco
+}  // namespace grpc
+}  // namespace falco
